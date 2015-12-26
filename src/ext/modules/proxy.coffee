@@ -172,10 +172,10 @@ H2O.Proxy = (_) ->
 
   requestFrameSummarySlice = (key, searchTerm, offset, count, go) ->
     #TODO send search term
-    doGet "/3/Frames/#{encodeURIComponent key}/summary?column_offset=#{offset}&column_count=#{count}&_exclude_fields=frames/vec_ids,frames/columns/data,frames/columns/domain,frames/columns/histogram_bins,frames/columns/percentiles", unwrap go, (result) -> head result.frames
+    doGet "/3/Frames/#{encodeURIComponent key}/summary?column_offset=#{offset}&column_count=#{count}&_exclude_fields=frames/columns/data,frames/columns/domain,frames/columns/histogram_bins,frames/columns/percentiles", unwrap go, (result) -> head result.frames
 
   requestFrameSummaryWithoutData = (key, go) ->
-    doGet "/3/Frames/#{encodeURIComponent key}/summary?_exclude_fields=frames/chunk_summary,frames/distribution_summary,frames/vec_ids,frames/columns/data,frames/columns/domain,frames/columns/histogram_bins,frames/columns/percentiles", (error, result) ->
+    doGet "/3/Frames/#{encodeURIComponent key}/summary?_exclude_fields=frames/chunk_summary,frames/distribution_summary,frames/columns/data,frames/columns/domain,frames/columns/histogram_bins,frames/columns/percentiles", (error, result) ->
       if error
         go error
       else
@@ -267,12 +267,22 @@ H2O.Proxy = (_) ->
       chunk_size: chunkSize
     doPost '/3/Parse', opts, go
 
+  requestGrids = (go, opts) ->
+    doGet "/99/Grids", (error, result) ->
+      if error
+        go error, result
+      else
+        go error, result.grids
+
   requestModels = (go, opts) ->
     requestWithOpts '/3/Models', opts, (error, result) ->
       if error
         go error, result
       else
         go error, result.models
+
+  requestGrid = (key, go) ->
+    doGet "/99/Grids/#{encodeURIComponent key}", go
 
   requestModel = (key, go) ->
     doGet "/3/Models/#{encodeURIComponent key}", (error, result) ->
@@ -287,19 +297,34 @@ H2O.Proxy = (_) ->
   requestDeleteModel = (key, go) ->
     doDelete "/3/Models/#{encodeURIComponent key}", go
 
+  requestImportModel = (path, overwrite, go) ->
+    opts =
+      dir: path
+      force: overwrite
+    doPost "/99/Models.bin/not_in_use", opts, go
+
+  requestExportModel = (key, path, overwrite, go) ->
+    doGet "/99/Models.bin/#{encodeURIComponent key}?dir=#{encodeURIComponent path}&force=#{overwrite}", go
+
   requestModelBuildersVisibility = (go) ->
     doGet '/3/Configuration/ModelBuilders/visibility', unwrap go, (result) -> result.value
 
   __modelBuilders = null
   __modelBuilderEndpoints = null
+  __gridModelBuilderEndpoints = null
   cacheModelBuilders = (modelBuilders) ->
     modelBuilderEndpoints = {}
+    gridModelBuilderEndpoints = {}
     for modelBuilder in modelBuilders
       modelBuilderEndpoints[modelBuilder.algo] = "/#{modelBuilder.__meta.schema_version}/ModelBuilders/#{modelBuilder.algo}"
+      gridModelBuilderEndpoints[modelBuilder.algo] = "/99/Grid/#{modelBuilder.algo}"
     __modelBuilderEndpoints = modelBuilderEndpoints
+    __gridModelBuilderEndpoints = gridModelBuilderEndpoints
     __modelBuilders = modelBuilders
+
   getModelBuilders = -> __modelBuilders
   getModelBuilderEndpoint = (algo) -> __modelBuilderEndpoints[algo]
+  getGridModelBuilderEndpoint = (algo) -> __gridModelBuilderEndpoints[algo]
 
   requestModelBuilders = (go) ->
     if modelBuilders = getModelBuilders()
@@ -328,7 +353,12 @@ H2O.Proxy = (_) ->
 
   requestModelBuild = (algo, parameters, go) ->
     _.trackEvent 'model', algo
-    doPost getModelBuilderEndpoint(algo), (encodeObjectForPost parameters), go
+    if parameters.hyper_parameters
+      # super-hack: nest this object as stringified json
+      parameters.hyper_parameters = stringify parameters.hyper_parameters
+      doPost getGridModelBuilderEndpoint(algo), (encodeObjectForPost parameters), go
+    else
+      doPost getModelBuilderEndpoint(algo), (encodeObjectForPost parameters), go
 
   requestPredict = (destinationKey, modelKey, frameKey, options, go) ->
     opts = {}
@@ -507,10 +537,14 @@ H2O.Proxy = (_) ->
   link _.requestParseSetup, requestParseSetup
   link _.requestParseSetupPreview, requestParseSetupPreview
   link _.requestParseFiles, requestParseFiles
+  link _.requestGrids, requestGrids
   link _.requestModels, requestModels
+  link _.requestGrid, requestGrid
   link _.requestModel, requestModel
   link _.requestPojoPreview, requestPojoPreview
   link _.requestDeleteModel, requestDeleteModel
+  link _.requestImportModel, requestImportModel
+  link _.requestExportModel, requestExportModel
   link _.requestModelBuilder, requestModelBuilder
   link _.requestModelBuilders, requestModelBuilders
   link _.requestModelBuild, requestModelBuild

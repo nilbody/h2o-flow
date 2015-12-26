@@ -3,7 +3,7 @@ if lightning.settings
   lightning.settings.axisLabelFont = '11px "Source Code Pro", monospace'
   lightning.settings.axisTitleFont = 'bold 11px "Source Code Pro", monospace'
 
-createTempKey = -> Flow.Util.uuid().replace /\-/g, ''
+createTempKey = -> 'flow_' + Flow.Util.uuid().replace /\-/g, ''
 createVector = lightning.createVector
 createFactor = lightning.createFactor
 createList = lightning.createList
@@ -22,6 +22,9 @@ _assistance =
   getModels:
     description: 'Get a list of models in H<sub>2</sub>O'
     icon: 'cubes'
+  getGrids:
+    description: 'Get a list of grid search results in H<sub>2</sub>O'
+    icon: 'th'
   getPredictions:
     description: 'Get a list of predictions in H<sub>2</sub>O'
     icon: 'bolt'
@@ -30,6 +33,9 @@ _assistance =
     icon: 'tasks'
   buildModel:
     description: 'Build a model'
+    icon: 'cube'
+  importModel:
+    description: 'Import a saved model'
     icon: 'cube'
   predict:
     description: 'Make a prediction'
@@ -590,7 +596,7 @@ H2O.Routines = (_) ->
           inspections["#{name} - #{v.name}"] = inspectTwoDimTable_ origin, "#{name} - #{v.name}", v
         else
           if isArray v
-            if k is 'cross_validation_models' or k is 'cross_validation_predictions' # megahack
+            if k is 'cross_validation_models' or k is 'cross_validation_predictions' or (name is 'output' and (k is 'weights' or k is 'biases')) # megahack
               inspections[k] = inspectObjectArray_ k, origin, k, v
             else
               inspections[k] = inspectRawArray_ k, origin, k, v
@@ -627,6 +633,12 @@ H2O.Routines = (_) ->
     inspect_ model, inspections
     render_ model, H2O.ModelOutput, model
 
+  extendGrid = (grid) ->
+    render_ grid, H2O.GridOutput, grid
+
+  extendGrids = (grids) ->
+    render_ grids, H2O.GridsOutput, grids
+
   extendModels = (models) ->
     inspections = {}
 
@@ -638,7 +650,6 @@ H2O.Routines = (_) ->
     # TODO implement model comparision after 2d table cleanup for model metrics
     #if modelCategories.length is 1
     #  inspections.outputs = inspectOutputsAcrossModels (head modelCategories), models
-    
 
     inspect_ models, inspections
     render_ models, H2O.ModelsOutput, models
@@ -811,7 +822,7 @@ H2O.Routines = (_) ->
           m = i * width
           n = m + width
           count = 0
-          for binIndex in [m ... n] when n < bins.length
+          for binIndex in [m ... n] when binIndex < bins.length
             count += bins[binIndex]
 
           intervalData[i] = base + i * interval
@@ -954,6 +965,7 @@ H2O.Routines = (_) ->
       else
         go null, extendFrameSummary frameKey, frame
 
+
   requestColumnSummary = (frameKey, columnName, go) ->
     _.requestColumnSummary frameKey, columnName, (error, frame) ->
       if error
@@ -1003,48 +1015,48 @@ H2O.Routines = (_) ->
 
       sum += part.ratio
 
-    console.log splits
     splits
+
+  requestBindFrames = (key, sourceKeys, go) ->
+    _.requestExec "(assign #{key} (cbind #{sourceKeys.join ' '}))", (error, result) ->
+      if error
+        go error
+      else
+        go null, extendBindFrames key, result
 
   requestSplitFrame = (frameKey, splitRatios, splitKeys, go) ->
     if splitRatios.length is splitKeys.length - 1
       splits = computeSplits splitRatios, splitKeys
 
-      frameExpr = JSON.stringify frameKey
       randomVecKey = createTempKey()
 
-      _.requestExec "(gput #{randomVecKey} (h2o.runif #{frameExpr} #-1))", (error, result) ->
+      statements = []
+
+      push statements, "(tmp= #{randomVecKey} (h2o.runif #{frameKey} -1))"
+
+      for part, i in splits
+        g = if i isnt 0 then "(>= #{randomVecKey} #{part.min})" else null
+
+        l = if i isnt splits.length - 1 then "(< #{randomVecKey} #{part.max})" else null
+
+        sliceExpr = if g and l
+          "(& #{g} #{l})"
+        else if l
+          l
+        else
+          g
+
+        push statements, "(assign #{part.key} (rows #{frameKey} #{sliceExpr}))"
+
+      push statements, "(rm #{randomVecKey})"
+
+      _.requestExec "(, #{statements.join ' '})", (error, result) ->
         if error
           go error
         else
-          exprs = for part, i in splits
-            g = if i isnt 0 then "(G %#{randomVecKey} ##{part.min})" else null
-
-            l = if i isnt splits.length - 1 then "(l %#{randomVecKey} ##{part.max})" else null
-
-            sliceExpr = if g and l
-              "(& #{g} #{l})"
-            else if l
-              l
-            else
-              g
-
-            "(gput #{JSON.stringify part.key} ([ %#{frameExpr} #{sliceExpr} \"null\"))"
-
-          futures = map exprs, (expr) ->
-            _fork _.requestExec, expr
-
-          Flow.Async.join futures, (error, results) ->
-            if error
-              go error
-            else
-              _.requestDeleteFrame randomVecKey, (error, result) ->
-                if error
-                  go error
-                else
-                  go null, extendSplitFrameResult
-                    keys: splitKeys
-                    ratios: splitRatios
+          go null, extendSplitFrameResult
+            keys: splitKeys
+            ratios: splitRatios
 
     else
       go new Flow.Error 'The number of split ratios should be one less than the number of split keys'
@@ -1070,6 +1082,9 @@ H2O.Routines = (_) ->
         _fork requestFrame, frameKey
       else
         assist getFrame
+
+  bindFrames = (key, sourceKeys) ->
+    _fork requestBindFrames, key, sourceKeys
 
   getFrameSummary = (frameKey) ->
     switch typeOf frameKey
@@ -1098,9 +1113,19 @@ H2O.Routines = (_) ->
   extendExportFrame = (result) ->
     render_ result, H2O.ExportFrameOutput, result
 
+  extendBindFrames = (key, result) ->
+    render_ result, H2O.BindFramesOutput, key, result
+
   requestExportFrame = (frameKey, path, opts, go) ->
     _.requestExportFrame frameKey, path, (if opts.overwrite then yes else no), (error, result) ->
-      if error then go error else go null, extendExportFrame result
+      if error
+        go error
+      else
+        _.requestJob result.job.key.name, (error, job) ->
+          if error
+            go error
+          else
+            go null, extendJob job
 
   exportFrame = (frameKey, path, opts={}) ->
     if frameKey and path
@@ -1148,6 +1173,13 @@ H2O.Routines = (_) ->
     else
       _fork requestModels
 
+  requestGrids = (go) ->
+    _.requestGrids (error, grids) ->
+      if error then go error else go null, extendGrids grids
+
+  getGrids = ->
+    _fork requestGrids
+
   requestModel = (modelKey, go) ->
     _.requestModel modelKey, (error, model) ->
       if error then go error else go null, extendModel model
@@ -1159,6 +1191,17 @@ H2O.Routines = (_) ->
       else
         assist getModel
 
+  requestGrid = (gridKey, go) ->
+    _.requestGrid gridKey, (error, grid) ->
+      if error then go error else go null, extendGrid grid
+
+  getGrid = (gridKey) ->
+    switch typeOf gridKey
+      when 'String'
+        _fork requestGrid, gridKey
+      else
+        assist getGrid
+
   findColumnIndexByColumnLabel = (frame, columnLabel) ->
     for column, i in frame.columns when column.label is columnLabel
       return i
@@ -1167,6 +1210,8 @@ H2O.Routines = (_) ->
   findColumnIndicesByColumnLabels = (frame, columnLabels) ->
     for columnLabel in columnLabels
       findColumnIndexByColumnLabel frame, columnLabel
+
+  
 
   requestImputeColumn = (opts, go) ->
     { frame, column, method, combineMethod, groupByColumns } = opts 
@@ -1189,11 +1234,11 @@ H2O.Routines = (_) ->
           groupByColumnIndices = null
 
         groupByArg = if groupByColumnIndices
-          "(llist #{groupByColumnIndices.map((a) -> '#' + a).join ' '})"
+          "[#{groupByColumnIndices.join ' '}]"
         else
-          "()"
+          "[]"
 
-        _.requestExec "(h2o.impute %#{JSON.stringify frame} ##{columnIndex} #{JSON.stringify method} #{JSON.stringify combineMethod} #{groupByArg} %TRUE)", (error, result) ->
+        _.requestExec "(assign #{frame} (h2o.impute #{frame} #{columnIndex} #{JSON.stringify method} #{JSON.stringify combineMethod} #{groupByArg}))", (error, result) ->
           if error
             go error
           else
@@ -1210,9 +1255,7 @@ H2O.Routines = (_) ->
         catch columnKeyError
           return go columnKeyError
 
-        target = "([ %#{JSON.stringify frame} \"null\" ##{columnIndex})"
-
-        _.requestExec "(= #{target} (#{method} #{target}))", (error, result) ->
+        _.requestExec "(assign #{frame} (:= #{frame} (#{method} (cols #{frame} #{columnIndex})) #{columnIndex} [0:#{result.rows}]))", (error, result) ->
           if error
             go error
           else
@@ -1239,6 +1282,32 @@ H2O.Routines = (_) ->
       _fork requestDeleteModel, modelKey
     else
       assist deleteModel
+
+  extendImportModel = (result) ->
+    render_ result, H2O.ImportModelOutput, result
+
+  requestImportModel = (path, opts, go) ->
+    _.requestImportModel path, (if opts.overwrite then yes else no), (error, result) ->
+      if error then go error else go null, extendImportModel result
+
+  importModel = (path, opts) ->
+    if path and path.length
+      _fork requestImportModel, path, opts
+    else
+      assist importModel, path, opts
+
+  extendExportModel = (result) ->
+    render_ result, H2O.ExportModelOutput, result
+
+  requestExportModel = (modelKey, path, opts, go) ->
+    _.requestExportModel modelKey, path, (if opts.overwrite then yes else no), (error, result) ->
+      if error then go error else go null, extendExportModel result
+
+  exportModel = (modelKey, path, opts) ->
+    if modelKey and path
+      _fork requestExportModel, modelKey, path, opts
+    else
+      assist exportModel, modelKey, path, opts
 
   requestDeleteModels = (modelKeys, go) ->
     futures = map modelKeys, (modelKey) ->
@@ -1616,6 +1685,10 @@ H2O.Routines = (_) ->
           _fork proceed, H2O.ExportFrameInput, args
         when imputeColumn
           _fork proceed, H2O.ImputeInput, args
+        when importModel
+          _fork proceed, H2O.ImportModelInput, args
+        when exportModel
+          _fork proceed, H2O.ExportModelInput, args
         else
           _fork proceed, H2O.NoAssist, []
 
@@ -1690,6 +1763,7 @@ H2O.Routines = (_) ->
   splitFrame: splitFrame
   getFrames: getFrames
   getFrame: getFrame
+  bindFrames: bindFrames
   getFrameSummary: getFrameSummary
   getFrameData: getFrameData
   deleteFrames: deleteFrames
@@ -1700,10 +1774,14 @@ H2O.Routines = (_) ->
   changeColumnType: changeColumnType
   imputeColumn: imputeColumn
   buildModel: buildModel
+  getGrids: getGrids
   getModels: getModels
   getModel: getModel
+  getGrid: getGrid
   deleteModels: deleteModels
   deleteModel: deleteModel
+  importModel: importModel
+  exportModel: exportModel
   predict: predict
   getPrediction: getPrediction
   getPredictions: getPredictions

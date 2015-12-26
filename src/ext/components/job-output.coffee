@@ -32,6 +32,10 @@ H2O.JobOutput = (_, _go, _job) ->
         'Frame'
       when 'Key<Model>'
         'Model'
+      when 'Key<Grid>'
+        'Grid'
+      when 'Key<KeyedVoid>'
+        'Void'
       else
         'Unknown'
 
@@ -95,7 +99,12 @@ H2O.JobOutput = (_, _go, _job) ->
       when 'Frame'
         _.insertAndExecuteCell 'cs', "getFrameSummary #{stringify _destinationKey}" 
       when 'Model'
-        _.insertAndExecuteCell 'cs', "getModel #{stringify _destinationKey}" 
+        _.insertAndExecuteCell 'cs', "getModel #{stringify _destinationKey}"
+      when 'Grid'
+        _.insertAndExecuteCell 'cs', "getGrid #{stringify _destinationKey}"
+
+      when 'Void'
+        alert "This frame was exported to\n#{_job.dest.name}"
 
   cancel = ->
     _.requestCancelJob _key, (error, result) ->

@@ -286,6 +286,15 @@ H2O.ModelOutput = (_, _go, _model) ->
               g.from table
             )
 
+      if output = _model.output
+        if output.model_category is 'Multinomial'
+          if confusionMatrix = output.training_metrics?.cm?.table
+            renderMultinomialConfusionMatrix 'Training Metrics - Confusion Matrix', confusionMatrix
+          if confusionMatrix = output.validation_metrics?.cm?.table
+            renderMultinomialConfusionMatrix 'Validation Metrics - Confusion Matrix', confusionMatrix
+          if confusionMatrix = output.cross_validation_metrics?.cm?.table
+            renderMultinomialConfusionMatrix 'Cross Validation Metrics - Confusion Matrix', confusionMatrix
+
     when 'deeplearning'
       if table = _.inspect 'output - training_metrics - Metrics for Thresholds', _model
         plotter = _.plot (g) ->
@@ -343,36 +352,36 @@ H2O.ModelOutput = (_, _go, _model) ->
           )
 
       if table = _.inspect 'output - Scoring History', _model
-        if table.schema['validation_MSE']
-          renderPlot 'Scoring History - MSE', no, _.plot (g) ->
+        if table.schema['validation_logloss']
+          renderPlot 'Scoring History - logloss', no, _.plot (g) ->
             g(
               g.path(
-                g.position 'epochs', 'training_MSE'
+                g.position 'epochs', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.path(
-                g.position 'epochs', 'validation_MSE'
+                g.position 'epochs', 'validation_logloss'
                 g.strokeColor g.value '#ff7f0e'
               )
               g.point(
-                g.position 'epochs', 'training_MSE'
+                g.position 'epochs', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.point(
-                g.position 'epochs', 'validation_MSE'
+                g.position 'epochs', 'validation_logloss'
                 g.strokeColor g.value '#ff7f0e'
               )
               g.from table
             )
         else
-          renderPlot 'Scoring History - MSE', no, _.plot (g) ->
+          renderPlot 'Scoring History - logloss', no, _.plot (g) ->
             g(
               g.path(
-                g.position 'epochs', 'training_MSE'
+                g.position 'epochs', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.point(
-                g.position 'epochs', 'training_MSE'
+                g.position 'epochs', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.from table
@@ -425,36 +434,36 @@ H2O.ModelOutput = (_, _go, _model) ->
 
     when 'gbm', 'drf'
       if table = _.inspect 'output - Scoring History', _model
-        if table.schema['validation_MSE']
-          renderPlot 'Scoring History - MSE', no, _.plot (g) ->
+        if table.schema['validation_logloss']
+          renderPlot 'Scoring History - logloss', no, _.plot (g) ->
             g(
               g.path(
-                g.position 'number_of_trees', 'training_MSE'
+                g.position 'number_of_trees', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.path(
-                g.position 'number_of_trees', 'validation_MSE'
+                g.position 'number_of_trees', 'validation_logloss'
                 g.strokeColor g.value '#ff7f0e'
               )
               g.point(
-                g.position 'number_of_trees', 'training_MSE'
+                g.position 'number_of_trees', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.point(
-                g.position 'number_of_trees', 'validation_MSE'
+                g.position 'number_of_trees', 'validation_logloss'
                 g.strokeColor g.value '#ff7f0e'
               )
               g.from table
             )
         else
-          renderPlot 'Scoring History - MSE', no, _.plot (g) ->
+          renderPlot 'Scoring History - logloss', no, _.plot (g) ->
             g(
               g.path(
-                g.position 'number_of_trees', 'training_MSE'
+                g.position 'number_of_trees', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.point(
-                g.position 'number_of_trees', 'training_MSE'
+                g.position 'number_of_trees', 'training_logloss'
                 g.strokeColor g.value '#1f77b4'
               )
               g.from table
@@ -563,6 +572,46 @@ H2O.ModelOutput = (_, _go, _model) ->
           if confusionMatrix = output.cross_validation_metrics?.cm?.table
             renderMultinomialConfusionMatrix 'Cross Validation Metrics - Confusion Matrix', confusionMatrix
 
+  if table = _.inspect 'output - training_metrics - Gains/Lift Table', _model
+    renderPlot 'Training Metrics - Gains/Lift Table', no, _.plot (g) ->
+      g(
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_capture_rate'
+          g.strokeColor g.value 'black'
+        )
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_lift'
+          g.strokeColor g.value 'green'
+        )
+        g.from table
+      )
+  if table = _.inspect 'output - validation_metrics - Gains/Lift Table', _model
+    renderPlot 'Validation Metrics - Gains/Lift Table', no, _.plot (g) ->
+      g(
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_capture_rate'
+          g.strokeColor g.value 'black'
+        )
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_lift'
+          g.strokeColor g.value 'green'
+        )
+        g.from table
+      )
+  if table = _.inspect 'output - cross_validation_metrics - Gains/Lift Table', _model
+    renderPlot 'Cross Validation Metrics - Gains/Lift Table', no, _.plot (g) ->
+      g(
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_capture_rate'
+          g.strokeColor g.value 'black'
+        )
+        g.path(
+          g.position 'cumulative_data_fraction', 'cumulative_lift'
+          g.strokeColor g.value 'green'
+        )
+        g.from table
+      )
+
   for tableName in _.ls _model when tableName isnt 'parameters'
 
     # Skip CM tables for multinomial models
@@ -602,7 +651,10 @@ H2O.ModelOutput = (_, _go, _model) ->
         _pojoPreview "<pre>#{Flow.Util.highlight result, 'java'}</pre>"
 
   downloadPojo = ->
-    window.open "/3/Models.java/#{encodeURIComponent _model.model_id.name}.java", '_blank'
+    window.open "/3/Models.java/#{encodeURIComponent _model.model_id.name}", '_blank'
+
+  exportModel = ->
+    _.insertAndExecuteCell 'cs', "exportModel #{stringify _model.model_id.name}"
 
   deleteModel = ->
     _.confirm 'Are you sure you want to delete this model?', { acceptCaption: 'Delete Model', declineCaption: 'Cancel' }, (accept) ->
@@ -624,6 +676,7 @@ H2O.ModelOutput = (_, _go, _model) ->
   downloadPojo: downloadPojo
   pojoPreview: _pojoPreview
   isPojoLoaded: _isPojoLoaded
+  exportModel: exportModel
   deleteModel: deleteModel
   template: 'flow-model-output'
 
